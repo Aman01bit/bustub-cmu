@@ -50,6 +50,9 @@ class BPlusTreeInternalPage : public BPlusTreePage {
   BPlusTreeInternalPage() = delete;
   BPlusTreeInternalPage(const BPlusTreeInternalPage &other) = delete;
 
+  template <typename K, typename V, typename C, ssize_t N>
+  friend class BPlusTree;
+
   void Init(int max_size = INTERNAL_PAGE_SLOT_CNT);
 
   auto KeyAt(int index) const -> KeyType;

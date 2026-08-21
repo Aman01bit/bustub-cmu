@@ -18,9 +18,13 @@
 
 #include "gtest/gtest.h"
 
+#include <random>
+#include <unordered_map>
+#include <unordered_set>
+
 namespace bustub {
 
-TEST(ArcReplacerTest, DISABLED_SampleTest) {
+TEST(ArcReplacerTest, SampleTest) {
   // for the sake of simplicity
   // we use (a, fb) to notate page a on frame b,
   // (a, _) to mark ghost page with page id a
@@ -102,7 +106,7 @@ TEST(ArcReplacerTest, DISABLED_SampleTest) {
   ASSERT_EQ(2, arc_replacer.Evict());
 }
 
-TEST(ArcReplacerTest, DISABLED_SampleTest2) {
+TEST(ArcReplacerTest, SampleTest2) {
   // Test a smaller capacity
   ArcReplacer arc_replacer(3);
   // Fill up the replacer
@@ -214,7 +218,7 @@ TEST(ArcReplacerTest, DISABLED_SampleTest2) {
   ASSERT_EQ(1, arc_replacer.Evict());
 }
 
-TEST(ArcReplacerTest, DISABLED_RemoveBehaviorTest) {
+TEST(ArcReplacerTest, RemoveBehaviorTest) {
   // Scenario 1: Remove from empty replacer — should be a no-op
   {
     ArcReplacer arc_replacer(5);
@@ -371,6 +375,168 @@ TEST(ArcReplacerTest, DISABLED_RemoveBehaviorTest) {
   }
 }
 
+TEST(ArcReplacerTest, TargetSizeAdaptDownRepro) {
+  ArcReplacer arc_replacer(6);
+
+  // Build up MRU ghost list to be large (size 4), MFU ghost list to stay small (size 1)
+  // Step 1: fill and evict 4 pages into mru_ghost_
+  arc_replacer.RecordAccess(0, 10);
+  arc_replacer.SetEvictable(0, true);
+  arc_replacer.RecordAccess(1, 11);
+  arc_replacer.SetEvictable(1, true);
+  arc_replacer.RecordAccess(2, 12);
+  arc_replacer.SetEvictable(2, true);
+  arc_replacer.RecordAccess(3, 13);
+  arc_replacer.SetEvictable(3, true);
+
+  ASSERT_EQ(0, arc_replacer.Evict());  // page 10 -> mru_ghost_
+  ASSERT_EQ(1, arc_replacer.Evict());  // page 11 -> mru_ghost_
+  ASSERT_EQ(2, arc_replacer.Evict());  // page 12 -> mru_ghost_
+  ASSERT_EQ(3, arc_replacer.Evict());  // page 13 -> mru_ghost_
+  // mru_ghost_ = [13,12,11,10] size 4, mfu_ghost_ = [] size 0
+
+  // Step 2: get one page into mfu_ghost_ (access twice then evict)
+  arc_replacer.RecordAccess(4, 14);
+  arc_replacer.SetEvictable(4, true);
+  arc_replacer.RecordAccess(4, 14);    // second access -> moves to mfu_
+  ASSERT_EQ(4, arc_replacer.Evict());  // page 14 -> mfu_ghost_
+  // mru_ghost_ size 4, mfu_ghost_ size 1
+
+  // Step 3: hit MRU ghost (page 10) to bump mru_target_size_ up
+  // mru_ghost_size(4) >= mfu_ghost_size(1) -> +1
+  arc_replacer.RecordAccess(5, 10);
+  arc_replacer.SetEvictable(5, true);
+  // mru_target_size_ should now be 1
+
+  // Now hit MFU ghost (page 14): mfu_ghost_size(now 1) vs mru_ghost_size(now 3, since 10 was removed)
+  // mfu_ghost_size(1) < mru_ghost_size(3) -> ratio = 3/1 = 3
+  // mru_target_size_ should decrease by 3, but floor at 0
+  arc_replacer.RecordAccess(0, 14);
+  arc_replacer.SetEvictable(0, true);
+
+  // PRINT/CHECK: mru_target_size_ should be 0 here (1 - 3, floored)
+  // Add a getter or use existing test infra to inspect mru_target_size_ if available
+  SUCCEED();
+}
+
 // Feel free to write more tests!
+
+// Corrected version: never reuses a frame_id for a different page_id
+// while that frame is still alive (matches real BufferPoolManager contract).
+
+TEST(ArcReplacerTest, InvariantStressTestV2) {
+  const size_t kCapacity = 8;
+  ArcReplacer arc_replacer(kCapacity);
+
+  std::mt19937 rng(12345);
+  std::uniform_int_distribution<int> op_dist(0, 3);
+  std::uniform_int_distribution<int> frame_dist(0, static_cast<int>(kCapacity) - 1);
+  std::uniform_int_distribution<int> page_pool_dist(0, 30);  // pool of reusable page ids for ghost hits
+
+  // Tracks which page (if any) currently occupies each frame while alive.
+  std::unordered_map<frame_id_t, page_id_t> frame_to_page;
+  std::unordered_map<frame_id_t, bool> evictable_state;
+
+  auto check_invariants = [&](const std::string &label) {
+    size_t expected_evictable = 0;
+    for (auto &kv : evictable_state) {
+      if (frame_to_page.count(kv.first) != 0 && kv.second) {
+        expected_evictable++;
+      }
+    }
+    ASSERT_EQ(expected_evictable, arc_replacer.Size()) << "Size() mismatch after " << label;
+  };
+
+  for (int step = 0; step < 5000; step++) {
+    int op = op_dist(rng);
+    frame_id_t fid = frame_dist(rng);
+    bool frame_is_alive = frame_to_page.count(fid) != 0;
+
+    if (op == 0) {
+      if (!frame_is_alive) {
+        // Only assign a new page to a frame that is currently free.
+        page_id_t pid = page_pool_dist(rng);
+        arc_replacer.RecordAccess(fid, pid);
+        frame_to_page[fid] = pid;
+        evictable_state[fid] = false;
+      } else {
+        // Frame already alive: re-access with its SAME page (simulates a repeat pin/hit).
+        arc_replacer.RecordAccess(fid, frame_to_page[fid]);
+      }
+      check_invariants("RecordAccess");
+    } else if (op == 1) {
+      if (frame_is_alive) {
+        bool make_evictable = (rng() % 2) == 0;
+        arc_replacer.SetEvictable(fid, make_evictable);
+        evictable_state[fid] = make_evictable;
+        check_invariants("SetEvictable");
+      }
+    } else if (op == 2) {
+      auto result = arc_replacer.Evict();
+      if (result.has_value()) {
+        frame_id_t evicted = result.value();
+        frame_to_page.erase(evicted);
+        evictable_state[evicted] = false;
+      }
+      check_invariants("Evict");
+    } else {
+      if (frame_is_alive && evictable_state[fid]) {
+        arc_replacer.Remove(fid);
+        frame_to_page.erase(fid);
+        evictable_state[fid] = false;
+        check_invariants("Remove");
+      }
+    }
+  }
+
+  SUCCEED();
+}
+
+TEST(ArcReplacerTest, TargetSizeAdaptDownManualTrace) {
+  ArcReplacer arc_replacer(6);
+
+  // Build 4 entries into mru_ghost_
+  arc_replacer.RecordAccess(0, 10);
+  arc_replacer.SetEvictable(0, true);
+  arc_replacer.RecordAccess(1, 11);
+  arc_replacer.SetEvictable(1, true);
+  arc_replacer.RecordAccess(2, 12);
+  arc_replacer.SetEvictable(2, true);
+  arc_replacer.RecordAccess(3, 13);
+  arc_replacer.SetEvictable(3, true);
+  ASSERT_EQ(0, arc_replacer.Evict());
+  ASSERT_EQ(1, arc_replacer.Evict());
+  ASSERT_EQ(2, arc_replacer.Evict());
+  ASSERT_EQ(3, arc_replacer.Evict());
+  // mru_ghost_ = [13,12,11,10] size 4, mfu_ghost_ = [] size 0
+
+  // Build 1 entry into mfu_ghost_
+  arc_replacer.RecordAccess(4, 14);
+  arc_replacer.SetEvictable(4, true);
+  arc_replacer.RecordAccess(4, 14);  // -> mfu_
+  ASSERT_EQ(4, arc_replacer.Evict());
+  // mru_ghost_ size 4, mfu_ghost_ size 1
+
+  // MRU ghost hit on page 10: mru_ghost_size(4) >= mfu_ghost_size(1) -> target += 1 -> target=1
+  arc_replacer.RecordAccess(5, 10);
+  arc_replacer.SetEvictable(5, true);
+  // mru_ghost_ now [13,12,11] size 3, mfu_ghost_ still [14] size 1
+
+  // MFU ghost hit on page 14: mfu_ghost_size(1) vs mru_ghost_size(3)
+  // mfu_ghost_size(1) < mru_ghost_size(3) -> ratio = 3/1 = 3 -> target = max(0, 1-3) = 0
+  arc_replacer.RecordAccess(0, 14);
+  arc_replacer.SetEvictable(0, true);
+  // target should now be 0
+
+  // Add one more frame to mru_ so Evict() has something to pick from both sides
+  arc_replacer.RecordAccess(1, 20);
+  arc_replacer.SetEvictable(1, true);
+  // mru_ = [20@f1], mfu_ = [14@f0, 10@f5]
+
+  // target=0 means mru_.size()(1) >= target(0) is true -> should evict from mru_ first -> expect frame 1
+  auto result = arc_replacer.Evict();
+  std::cout << "Evict() returned: " << (result.has_value() ? result.value() : -1) << " (expected 1)\n";
+  ASSERT_EQ(1, result);
+}
 
 }  // namespace bustub

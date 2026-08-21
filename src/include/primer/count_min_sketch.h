@@ -85,6 +85,10 @@ class CountMinSketch {
   /** Pre-computed hash functions for each row */
   std::vector<std::function<size_t(const KeyType &)>> hash_functions_;
 
+  /*creating the contigous matrix here for better spatial cache locality 1D matrix_ and for finding location = row *
+   * index + col */
+  std::vector<std::atomic<uint32_t>> matrix_;
+
   /** @spring2026 PLEASE DO NOT MODIFY THE FOLLOWING */
   constexpr static size_t SEED_BASE = 15445;
 

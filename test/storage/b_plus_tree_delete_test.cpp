@@ -193,4 +193,175 @@ TEST(BPlusTreeTests, DISABLED_SequentialEdgeMixTest) {  // NOLINT
 
   delete bpm;
 }
+
+TEST(BPlusTreeTests, DISABLED_LargeScaleMixRepro) {
+  auto key_schema = ParseCreateStatement("a bigint");
+  GenericComparator<8> comparator(key_schema.get());
+
+  auto disk_manager = std::make_unique<DiskManagerUnlimitedMemory>();
+  auto *bpm = new BufferPoolManager(200, disk_manager.get());
+  page_id_t page_id = bpm->NewPage();
+
+  BPlusTree<GenericKey<8>, RID, GenericComparator<8>, 2> tree("foo_pk", page_id, bpm, comparator, 4, 4);
+  GenericKey<8> index_key;
+  RID rid;
+
+  std::vector<int64_t> inserted;
+  const int64_t total = 1500;
+
+  // Insert a large number of keys
+  for (int64_t i = 0; i < total; i++) {
+    int64_t value = i & 0xFFFFFFFF;
+    rid.Set(static_cast<int32_t>(i >> 32), value);
+    index_key.SetFromInteger(i);
+    tree.Insert(index_key, rid);
+    inserted.push_back(i);
+  }
+
+  // Delete all but 10, leaving a small final set
+  for (int64_t i = 10; i < total; i++) {
+    index_key.SetFromInteger(i);
+    tree.Remove(index_key);
+  }
+
+  // Count via GetValue for every originally-inserted key
+  int64_t live_count = 0;
+  for (int64_t i = 0; i < total; i++) {
+    index_key.SetFromInteger(i);
+    std::vector<RID> rids;
+    if (tree.GetValue(index_key, &rids)) {
+      live_count++;
+    }
+  }
+
+  fprintf(stderr, "live_count via GetValue = %ld (expected 10)\n", live_count);
+
+  // Also count via the iterator
+  int64_t iter_count = 0;
+  for (auto it = tree.Begin(); it != tree.End(); ++it) {
+    iter_count++;
+  }
+  fprintf(stderr, "iter_count via Begin/End = %ld (expected 10)\n", iter_count);
+
+  EXPECT_EQ(live_count, 10);
+  EXPECT_EQ(iter_count, 10);
+
+  delete bpm;
+}
+
+
+TEST(BPlusTreeTests, DISABLED_LargeScaleMixRepro2) {
+  auto key_schema = ParseCreateStatement("a bigint");
+  GenericComparator<8> comparator(key_schema.get());
+
+  auto disk_manager = std::make_unique<DiskManagerUnlimitedMemory>();
+  auto *bpm = new BufferPoolManager(200, disk_manager.get());
+  page_id_t page_id = bpm->NewPage();
+
+  BPlusTree<GenericKey<8>, RID, GenericComparator<8>, 2> tree("foo_pk", page_id, bpm, comparator, 4, 4);
+  GenericKey<8> index_key;
+  RID rid;
+
+  std::set<int64_t> present;
+  const int64_t total = 1500;
+
+  // Interleave insert and delete: insert i, and every 3rd step, delete
+  // something further back to keep the tree churning.
+  for (int64_t i = 0; i < total; i++) {
+    int64_t value = i & 0xFFFFFFFF;
+    rid.Set(static_cast<int32_t>(i >> 32), value);
+    index_key.SetFromInteger(i);
+    tree.Insert(index_key, rid);
+    present.insert(i);
+
+    if (i >= 20 && i % 3 == 0) {
+      int64_t to_remove = i - 20;
+      if (present.count(to_remove)) {
+        index_key.SetFromInteger(to_remove);
+        tree.Remove(index_key);
+        present.erase(to_remove);
+      }
+    }
+  }
+
+  // Now delete down to exactly 10 remaining keys
+  std::vector<int64_t> remaining(present.begin(), present.end());
+  while (remaining.size() > 10) {
+    int64_t to_remove = remaining.back();
+    remaining.pop_back();
+    index_key.SetFromInteger(to_remove);
+    tree.Remove(index_key);
+    present.erase(to_remove);
+  }
+
+  int64_t live_count = 0;
+  for (int64_t i = 0; i < total; i++) {
+    index_key.SetFromInteger(i);
+    std::vector<RID> rids;
+    if (tree.GetValue(index_key, &rids)) {
+      live_count++;
+    }
+  }
+
+  int64_t iter_count = 0;
+  for (auto it = tree.Begin(); it != tree.End(); ++it) {
+    iter_count++;
+  }
+
+  fprintf(stderr, "present.size()=%zu, live_count=%ld, iter_count=%ld (expected %zu)\n",
+          present.size(), live_count, iter_count, present.size());
+
+  EXPECT_EQ(static_cast<size_t>(live_count), present.size());
+  EXPECT_EQ(static_cast<size_t>(iter_count), present.size());
+
+  delete bpm;
+}
+
+TEST(BPlusTreeTests, DISABLED_LargeScaleMixRepro3) {
+  auto key_schema = ParseCreateStatement("a bigint");
+  GenericComparator<8> comparator(key_schema.get());
+
+  auto disk_manager = std::make_unique<DiskManagerUnlimitedMemory>();
+  auto *bpm = new BufferPoolManager(200, disk_manager.get());
+  page_id_t page_id = bpm->NewPage();
+
+  BPlusTree<GenericKey<8>, RID, GenericComparator<8>, 2> tree("foo_pk", page_id, bpm, comparator, 4, 4);
+  GenericKey<8> index_key;
+  RID rid;
+
+  const int64_t total = 1250;
+
+  for (int64_t i = 0; i < total; i++) {
+    int64_t value = i & 0xFFFFFFFF;
+    rid.Set(static_cast<int32_t>(i >> 32), value);
+    index_key.SetFromInteger(i);
+    tree.Insert(index_key, rid);
+  }
+
+  // Delete every key EXCEPT every 125th one (leaves exactly 10 survivors: 0, 125, 250, ...)
+  int64_t deleted_count = 0;
+  for (int64_t i = 0; i < total; i++) {
+    if (i % 125 != 0) {
+      index_key.SetFromInteger(i);
+      tree.Remove(index_key);
+      deleted_count++;
+
+      // Check correctness incrementally, not just at the end
+      std::vector<RID> rids;
+      if (tree.GetValue(index_key, &rids)) {
+        fprintf(stderr, "KEY %ld STILL PRESENT after Remove! (delete #%ld)\n", i, deleted_count);
+      }
+    }
+  }
+
+  int64_t size = 0;
+  for (auto it = tree.Begin(); it != tree.End(); ++it) {
+    size++;
+  }
+  fprintf(stderr, "final size=%ld (expected 10)\n", size);
+  EXPECT_EQ(size, 10);
+
+  delete bpm;
+}
+
 }  // namespace bustub

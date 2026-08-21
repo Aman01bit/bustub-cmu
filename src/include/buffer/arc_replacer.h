@@ -34,6 +34,8 @@ struct FrameStatus {
   frame_id_t frame_id_;
   bool evictable_;
   ArcStatus arc_status_;
+  std::list<frame_id_t>::iterator list_iterator_;
+
   FrameStatus(page_id_t pid, frame_id_t fid, bool ev, ArcStatus st)
       : page_id_(pid), frame_id_(fid), evictable_(ev), arc_status_(st) {}
 };
@@ -59,6 +61,18 @@ class ArcReplacer {
   void SetEvictable(frame_id_t frame_id, bool set_evictable);
   void Remove(frame_id_t frame_id);
   auto Size() -> size_t;
+
+  void MoveMRUToFrontOfMFU(const std::shared_ptr<FrameStatus> &frame_status);
+  void MoveMFUToFront(const std::shared_ptr<FrameStatus> &frame_status);
+  void InsertMRU(frame_id_t frame_id, page_id_t page_id);
+  void InsertMFU(frame_id_t frame_id, page_id_t page_id);
+  void RemoveAlive(const std::shared_ptr<FrameStatus> &frame_status);
+  void RemoveGhost(const std::shared_ptr<FrameStatus> &frame_status);
+  void IncreaseTargetOnMRUGhostHit();
+  void DecreaseTargetOnMFUGhostHit();
+  auto MoveAliveToGhost(const std::shared_ptr<FrameStatus> &frame_status) -> frame_id_t;
+  auto TryEvictMRU() -> std::optional<frame_id_t>;
+  auto TryEvictMFU() -> std::optional<frame_id_t>;
 
  private:
   // TODO(student): implement me! You can replace or remove these member variables as you like.

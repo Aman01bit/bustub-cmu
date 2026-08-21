@@ -65,6 +65,12 @@ class BPlusTreeLeafPage : public BPlusTreePage {
   BPlusTreeLeafPage() = delete;
   BPlusTreeLeafPage(const BPlusTreeLeafPage &other) = delete;
 
+  template <typename K, typename V, typename C, ssize_t N>
+  friend class BPlusTree;
+
+  template <typename K, typename V, typename C, ssize_t N>
+  friend class IndexIterator;
+
   void Init(int max_size = LEAF_PAGE_SLOT_CNT);
 
   auto GetTombstones() const -> std::vector<KeyType>;

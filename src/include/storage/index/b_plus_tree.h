@@ -71,6 +71,8 @@ class Context {
 
 #define BPLUSTREE_TYPE BPlusTree<KeyType, ValueType, KeyComparator, NumTombs>
 
+enum Direction { LEFT_TO_RIGHT, RIGHT_TO_LEFT };
+
 // Main class providing the API for the Interactive B+ Tree.
 FULL_INDEX_TEMPLATE_ARGUMENTS_DEFN
 class BPlusTree {
@@ -87,9 +89,34 @@ class BPlusTree {
 
   // Insert a key-value pair into this B+ tree.
   auto Insert(const KeyType &key, const ValueType &value) -> bool;
+  auto InsertIntoLeaf(LeafPage *leaf, const KeyType &key, const ValueType &value) -> bool;
+  auto SplitLeaf(LeafPage *leaf) -> page_id_t;
+  auto InsertIntoInternal(InternalPage *internal, KeyType &seperator, page_id_t child_page_id) -> bool;
+  auto SplitInternal(InternalPage *internal) -> std::pair<KeyType, page_id_t>;
+  auto IsDuplicateKey(LeafPage *leaf, const KeyType &key) -> bool;
+
+  // Helpers for the tombstone update and deletions.
+  auto IsTombStoned(LeafPage *leaf, int index) -> std::optional<size_t>;
+  auto RemoveTombStoned(LeafPage *leaf, int tomb_idx) -> void;
+  auto UpdateTombStoned(LeafPage *leaf, int index, int amt) -> void;
+  auto InsertTombstone(LeafPage *leaf, int idx) -> void;
+  auto EvictOldestTombstone(LeafPage *leaf) -> void;
+  auto CountTombstonesInRange(LeafPage *donor, int lo, int hi) -> int;
 
   // Remove a key and its value from this B+ tree.
   void Remove(const KeyType &key);
+  auto IsLeafSafeToRemove(LeafPage *leaf) -> bool;
+  auto IsInternalSafeToRemove(InternalPage *internal) -> bool;
+  auto DeleteFromLeaf(LeafPage *leaf, const KeyType &key) -> std::optional<int>;
+  auto MergeLeaf(LeafPage *receiver, LeafPage *donor) -> void;
+  auto RedistributeLeaf(LeafPage *reciever, LeafPage *donor, Direction direction) -> bool;
+  auto RedistributeInternal(InternalPage *reciever, InternalPage *donor, const KeyType &seperator, Direction direction)
+      -> std::optional<KeyType>;
+  ;
+  auto DeleteFromInternal(InternalPage *internal, int child_index) -> void;
+  auto MergeInternal(InternalPage *receiver, InternalPage *donor, const KeyType &separator) -> void;
+  auto IsLeafBalanced(LeafPage *leaf) -> bool;
+  auto IsInternalBalanced(InternalPage *internal) -> bool;
 
   // Return the value associated with a given key
   auto GetValue(const KeyType &key, std::vector<ValueType> *result) -> bool;

@@ -20,6 +20,7 @@
 #include "common/config.h"
 #include "common/macros.h"
 #include "storage/page/b_plus_tree_leaf_page.h"
+#include "storage/page/page_guard.h"
 
 namespace bustub {
 
@@ -28,8 +29,11 @@ namespace bustub {
 
 FULL_INDEX_TEMPLATE_ARGUMENTS_DEFN
 class IndexIterator {
+  using LeafPage = BPlusTreeLeafPage<KeyType, ValueType, KeyComparator, NumTombs>;
+
  public:
   // you may define your own constructor based on your member variables
+  IndexIterator(std::shared_ptr<TracedBufferPoolManager> bpm, ReadPageGuard guard, int index);
   IndexIterator();
   ~IndexIterator();  // NOLINT
 
@@ -39,12 +43,26 @@ class IndexIterator {
 
   auto operator++() -> IndexIterator &;
 
-  auto operator==(const IndexIterator &itr) const -> bool { UNIMPLEMENTED("TODO(P2): Add implementation."); }
+  auto operator==(const IndexIterator &other) const -> bool;
 
-  auto operator!=(const IndexIterator &itr) const -> bool { UNIMPLEMENTED("TODO(P2): Add implementation."); }
+  auto operator!=(const IndexIterator &other) const -> bool;
+
+  void SkipTombstones();
+
+  static auto IsTombStonedConst(const LeafPage *leaf, int index) -> bool {
+    for (size_t i = 0; i < leaf->num_tombstones_; i += 1) {
+      if (static_cast<int>(leaf->tombstones_[i]) == index) {
+        return true;
+      }
+    }
+    return false;
+  }
 
  private:
   // add your own private member variables here
+  std::optional<ReadPageGuard> guard_;
+  std::shared_ptr<TracedBufferPoolManager> bpm_;
+  int index_{0};
 };
 
 }  // namespace bustub
