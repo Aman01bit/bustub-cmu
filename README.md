@@ -16,6 +16,12 @@ We make the autograder for each assignment available to non-CMU students on Grad
 
 **WARNING: IF YOU ARE A STUDENT OUTSIDE CMU, DO NOT MAKE YOUR SOLUTION PUBLICLY AVAILABLE, AND DO SUBMIT YOUR OWN WORK. OTHERWISE, YOU WILL BE BANNED FROM USING THE AUTOGRADER.** Thank you for creating a fair learning environment.
 
+## Completed Tasks
+1. Count-Min Sketch - Probabilistic data structure which keep tracks of the frequent access patterns of some e.g IP address or site.
+2. Buffer Pool Manager - Implemented the task of ARC replacers to keep track of the most recent database pages to be in buffer pool and keeping track of dirty and writing back to disk when     evicted.
+3. Concurrent B+ tree Index - Completed the task for B+ tree which stores the RID record id of a tuple in the leaf of database pages and internal pages which stores key to reach the leaf database pages.
+
+
 ## Cloning this Repository
 
 The following instructions are adapted from the GitHub documentation on [duplicating a repository](https://docs.github.com/en/github/creating-cloning-and-archiving-repositories/creating-a-repository-on-github/duplicating-a-repository). The procedure below walks you through creating a private BusTub repository that you can use for development.
